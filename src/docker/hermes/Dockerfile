@@ -1,0 +1,28 @@
+FROM debian:13.4
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential nodejs npm python3 python3-pip ripgrep ffmpeg gcc python3-dev libffi-dev git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Clone Hermes Agent
+RUN git clone https://github.com/nousresearch/hermes-agent /opt/hermes
+
+WORKDIR /opt/hermes
+
+# Install dependencies
+RUN pip install --no-cache-dir -e ".[all]" --break-system-packages && \
+    npm install --prefer-offline --no-audit && \
+    npx playwright install --with-deps chromium --only-shell && \
+    cd /opt/hermes/scripts/whatsapp-bridge && \
+    npm install --prefer-offline --no-audit && \
+    npm cache clean --force
+
+# Copy entrypoint
+COPY src/docker/hermes/entrypoint.sh /opt/hermes/docker/entrypoint.sh
+RUN chmod +x /opt/hermes/docker/entrypoint.sh
+
+ENV HERMES_HOME=/opt/data
+VOLUME [ "/opt/data" ]
+ENTRYPOINT [ "/opt/hermes/docker/entrypoint.sh" ]

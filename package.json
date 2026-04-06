@@ -1,0 +1,65 @@
+{
+  "name": "agent-devkit",
+  "version": "0.1.0",
+  "description": "Secure Docker-based development environment for AI agents - vendor-agnostic, safety-first, production-ready",
+  "main": "dist/index.js",
+  "bin": {
+    "agent-devkit": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "dev": "ts-node src/cli/index.ts",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "docker",
+    "openclaw",
+    "hermes",
+    "claude",
+    "openai",
+    "deepseek",
+    "development",
+    "security",
+    "container"
+  ],
+  "author": "AI Studio Labs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ai-studio-labs/agent-devkit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ai-studio-labs/agent-devkit/issues"
+  },
+  "homepage": "https://github.com/ai-studio-labs/agent-devkit#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.9",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "axios": "^1.6.5",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.1",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1",
+    "yaml": "^2.3.4"
+  }
+}

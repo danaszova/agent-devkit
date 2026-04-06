@@ -1,0 +1,205 @@
+version: '3.8'
+
+services:
+  # OpenClaw Agent Container
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:latest
+    container_name: agent-devkit-openclaw
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    environment:
+      - NODE_ENV=development
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - AI_PROVIDER=claude
+      - AGENT_NAME=openclaw
+      - OPENCLAW_CONFIG_gateway_controlUi_dangerouslyAllowHostHeaderOriginFallback=true
+      - GATEWAY_CONTROLUI_DANGEROUSLYALLOWHOSTHEADERORIGINFALLBACK=true
+    command: ["node", "openclaw.mjs", "gateway", "--bind", "lan", "--allow-unconfigured"]
+    volumes:
+      - agent-devkit-skills:/app/skills
+      - agent-devkit-config:/app/config
+      - agent-devkit-logs:/app/logs
+    networks:
+      - agent-devkit-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18789/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4g
+        reservations:
+          cpus: '0.5'
+          memory: 1g
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.framework=openclaw"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Hermes AI Agent Container
+  hermes:
+    build:
+      context: .
+      dockerfile: src/docker/hermes/Dockerfile
+    container_name: agent-devkit-hermes
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHON_ENV=development
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_PROVIDER=openai
+      - AGENT_NAME=hermes
+      - HERMES_HOME=/opt/data
+    command: ["gateway", "run"]
+    volumes:
+      - agent-devkit-skills:/opt/data/skills
+      - agent-devkit-config:/opt/data
+      - agent-devkit-memory:/opt/data/memories
+      - agent-devkit-logs:/opt/data/logs
+    networks:
+      - agent-devkit-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4g
+        reservations:
+          cpus: '0.5'
+          memory: 1g
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.framework=hermes"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # PostgreSQL Database (for agent state)
+  postgres:
+    image: postgres:15-alpine
+    container_name: agent-devkit-postgres
+    restart: unless-stopped
+    ports:
+      - "55432:5432"
+    environment:
+      - POSTGRES_USER=agent_devkit
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=agent_devkit
+    volumes:
+      - agent-devkit-postgres:/var/lib/postgresql/data
+    networks:
+      - agent-devkit-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_devkit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2g
+        reservations:
+          cpus: '0.25'
+          memory: 512m
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.service=database"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis (for caching and messaging)
+  redis:
+    image: redis:7-alpine
+    container_name: agent-devkit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - agent-devkit-redis:/data
+    networks:
+      - agent-devkit-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1g
+        reservations:
+          cpus: '0.1'
+          memory: 256m
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.service=cache"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  agent-devkit-network:
+    driver: bridge
+    labels:
+      - "agent-devkit.managed=true"
+
+volumes:
+  agent-devkit-skills:
+    driver: local
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.type=skills"
+  
+  agent-devkit-config:
+    driver: local
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.type=config"
+  
+  agent-devkit-memory:
+    driver: local
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.type=memory"
+  
+  agent-devkit-logs:
+    driver: local
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.type=logs"
+  
+  agent-devkit-postgres:
+    driver: local
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.type=database"
+  
+  agent-devkit-redis:
+    driver: local
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.type=cache"
