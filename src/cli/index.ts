@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import * as dotenv from 'dotenv';
+dotenv.config();
+
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { initCommand } from './commands/init';
@@ -10,6 +13,7 @@ import { logsCommand } from './commands/logs';
 import { pauseCommand } from './commands/pause';
 import { resumeCommand } from './commands/resume';
 import { registerSkillsCommands } from './commands/skills';
+import { dashboardCommand } from './commands/dashboard';
 
 const VERSION = '0.1.0';
 
@@ -76,6 +80,12 @@ program
 
 // Skills commands
 registerSkillsCommands(program);
+
+// Dashboard command
+program
+  .command('dashboard')
+  .description('Open the OpenClaw web dashboard in your browser')
+  .action(dashboardCommand);
 
 // Parse arguments
 program.parse(process.argv);

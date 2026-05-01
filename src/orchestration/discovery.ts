@@ -1,8 +1,13 @@
+import axios from 'axios';
 import { skillRegistry } from './registry';
+
+const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL || 'http://localhost:18789';
+const OPENCLAW_TIMEOUT = parseInt(process.env.OPENCLAW_TIMEOUT || '5000', 10);
 
 export class SkillDiscoveryService {
   private lastRefresh: Date | null = null;
-  
+  private openclawAvailable: boolean = false;
+
   constructor() {}
 
   /**
@@ -11,15 +16,15 @@ export class SkillDiscoveryService {
   public async discoverSkills(): Promise<void> {
     try {
       skillRegistry.clear();
-      
+
       // Load from Local examples (mocking local filesystem discovery)
       this.registerLocalSkills();
 
       // Query OpenClaw
       await this.queryOpenClaw();
 
-      // Query Hermes
-      await this.queryHermes();
+      // Query Hermes (skipped for now — focus is OpenClaw)
+      // await this.queryHermes();
 
       this.lastRefresh = new Date();
     } catch (err) {
@@ -34,7 +39,7 @@ export class SkillDiscoveryService {
       description: 'Provides current weather information for a given location',
       provider: 'local'
     });
-    
+
     skillRegistry.register({
       id: 'local.calculator',
       name: 'CalculatorSkill',
@@ -48,32 +53,88 @@ export class SkillDiscoveryService {
       description: 'Performs a search query to retrieve web results',
       provider: 'local'
     });
+
+    skillRegistry.register({
+      id: 'local.email-cleaner',
+      name: 'EmailCleaner',
+      description: 'Cleans Gmail inbox of promotions, ads, solicitations, and spam',
+      provider: 'local'
+    });
   }
 
   private async queryOpenClaw(): Promise<void> {
     try {
-      // In a real implementation: fetch('http://localhost:18789/skills')
-      // For MVP, we mock the discovery from OpenClaw
-      skillRegistry.register({
-        id: 'openclaw.browser',
-        name: 'Browser Navigation',
-        description: 'Navigate websites and extract DOM elements',
-        provider: 'openclaw'
+      const statusRes = await axios.get(`${OPENCLAW_BASE_URL}/api/status`, {
+        timeout: OPENCLAW_TIMEOUT
       });
-      skillRegistry.register({
-        id: 'openclaw.bash',
-        name: 'Bash Execution',
-        description: 'Execute shell scripts in isolated environment',
-        provider: 'openclaw'
-      });
-    } catch (error) {
-      console.warn('Failed to discover OpenClaw skills:', error);
+
+      if (statusRes.data?.status === 'ok') {
+        this.openclawAvailable = true;
+        console.log(
+          `[Discovery] OpenClaw connected (v${statusRes.data.version || 'unknown'}, uptime: ${statusRes.data.uptime || 'N/A'})`
+        );
+
+        try {
+          const skillsRes = await axios.get(`${OPENCLAW_BASE_URL}/api/skills`, {
+            timeout: OPENCLAW_TIMEOUT
+          });
+
+          const skills = skillsRes.data;
+          if (Array.isArray(skills) && skills.length > 0) {
+            skills.forEach((skill: any) => {
+              skillRegistry.register({
+                id: `openclaw.${skill.id || skill.name}`,
+                name: skill.name || skill.id || 'Unnamed Skill',
+                description: skill.description || 'OpenClaw managed skill',
+                provider: 'openclaw',
+                parameters: skill.parameters || skill.config || {}
+              });
+            });
+          } else {
+            // OpenClaw is alive but returned no skills — register fallback placeholders
+            this.registerFallbackOpenClawSkills();
+          }
+        } catch (skillsErr: any) {
+          console.warn('[Discovery] OpenClaw is up, but /api/skills failed:', skillsErr.message);
+          this.registerFallbackOpenClawSkills();
+        }
+      } else {
+        this.openclawAvailable = false;
+        console.warn('[Discovery] OpenClaw status endpoint returned unexpected response');
+      }
+    } catch (error: any) {
+      this.openclawAvailable = false;
+      if (error.code === 'ECONNREFUSED') {
+        console.warn(
+          `[Discovery] OpenClaw is not running at ${OPENCLAW_BASE_URL}. ` +
+          'Start it with: agent-devkit start'
+        );
+      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        console.warn('[Discovery] OpenClaw connection timed out — container may still be starting');
+      } else {
+        console.warn('[Discovery] OpenClaw discovery error:', error.message);
+      }
     }
   }
 
+  private registerFallbackOpenClawSkills(): void {
+    skillRegistry.register({
+      id: 'openclaw.browser',
+      name: 'Browser Navigation',
+      description: 'Navigate websites and extract DOM elements via OpenClaw',
+      provider: 'openclaw'
+    });
+    skillRegistry.register({
+      id: 'openclaw.bash',
+      name: 'Bash Execution',
+      description: 'Execute shell scripts in OpenClaw sandbox',
+      provider: 'openclaw'
+    });
+  }
+
   private async queryHermes(): Promise<void> {
+    // Intentionally left mocked — Hermes integration is out of scope for this pass.
     try {
-      // In a real implementation: fetch('http://localhost:8000/skills') or invoke CLI `hermes skills list --json`
       skillRegistry.register({
         id: 'hermes.whatsapp_bridge',
         name: 'WhatsApp Bridge',
@@ -89,6 +150,10 @@ export class SkillDiscoveryService {
     } catch (error) {
       console.warn('Failed to discover Hermes skills:', error);
     }
+  }
+
+  public isOpenClawAvailable(): boolean {
+    return this.openclawAvailable;
   }
 
   public getLastRefreshTime(): Date | null {

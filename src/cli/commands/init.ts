@@ -78,10 +78,25 @@ export async function initCommand(options: InitOptions): Promise<void> {
     );
 
     // Create .env template
-    const envTemplate = `# AI Provider API Keys
-CLAUDE_API_KEY=your_claude_api_key_here
-OPENAI_API_KEY=your_openai_api_key_here
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
+    const envTemplate = `# AI Provider API Keys - uncomment and fill in the one you want to use
+# CLAUDE_API_KEY=your_claude_api_key_here
+# OPENAI_API_KEY=your_openai_api_key_here
+# OPENROUTER_API_KEY=your_openrouter_api_key_here
+# DEEPSEEK_API_KEY=your_deepseek_api_key_here
+# KIMI_CODE_API_KEY=your_kimi_code_api_key_here
+# MOONSHOT_API_KEY=your_moonshot_api_key_here
+# ZAI_API_KEY=your_zai_api_key_here
+# GLM_API_KEY=your_glm_api_key_here
+# QWEN_API_KEY=your_qwen_api_key_here
+# QWEN_CODE_API_KEY=your_qwen_code_api_key_here
+
+# Gmail Inbox Cleaner (optional - set after running setup-email-cleaner)
+# GMAIL_USER=your.email@gmail.com
+# GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
+
+# OpenClaw Gateway (optional)
+# OPENCLAW_TOKEN=your_gateway_token_here
+# OPENCLAW_BASE_URL=http://localhost:18789
 
 # Database
 POSTGRES_PASSWORD=changeme
