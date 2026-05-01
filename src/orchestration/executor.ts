@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { execSync } from 'child_process';
 import { SkillResult } from '../templates/basic-skill';
 import { skillRegistry, SkillMetadata } from './registry';
 
@@ -6,8 +6,7 @@ export interface ExecutionOptions {
   timeoutMs?: number;
 }
 
-const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL || 'http://localhost:18789';
-const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN || '';
+const CONTAINER_NAME = 'agent-devkit-openclaw';
 
 export class SkillExecutor {
   /**
@@ -23,7 +22,7 @@ export class SkillExecutor {
     try {
       console.log(`[Executor] Executing ${skillId} on provider ${metadata.provider}...`);
 
-      const timeoutMs = options.timeoutMs || 60000;
+      const timeoutMs = options.timeoutMs || 120000;
 
       const executePromise = this.routeExecution(metadata, input);
       const timeoutPromise = new Promise<SkillResult>((_, reject) => {
@@ -77,12 +76,12 @@ export class SkillExecutor {
   }
 
   private async executeOpenClawSkill(metadata: SkillMetadata, input: any): Promise<SkillResult> {
-    // Verify OpenClaw is reachable before attempting execution
+    // Verify OpenClaw container is running
     try {
-      await axios.get(`${OPENCLAW_BASE_URL}/api/status`, { timeout: 3000 });
-    } catch (err: any) {
+      execSync(`docker ps -q -f name=${CONTAINER_NAME}`, { stdio: 'pipe' });
+    } catch {
       throw new Error(
-        `OpenClaw is not running at ${OPENCLAW_BASE_URL}. ` +
+        `OpenClaw container is not running. ` +
         `Start it with: agent-devkit start`
       );
     }
@@ -90,58 +89,54 @@ export class SkillExecutor {
     const message = this.buildOpenClawMessage(metadata, input);
 
     try {
-      const response = await axios.post(
-        `${OPENCLAW_BASE_URL}/api/sessions/main/messages`,
-        { message },
+      const output = execSync(
+        `docker exec ${CONTAINER_NAME} openclaw agent --session-id main --message ${JSON.stringify(message)} --json --timeout 120`,
         {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(OPENCLAW_TOKEN ? { Authorization: `Bearer ${OPENCLAW_TOKEN}` } : {})
-          },
-          timeout: 60000
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 130000
         }
       );
 
-      const data = response.data;
+      const data = JSON.parse(output);
+
+      if (data.status !== 'ok') {
+        throw new Error(`OpenClaw agent returned status: ${data.status}. Summary: ${data.summary || 'unknown'}`);
+      }
+
+      // Extract response text from payloads
+      const payloads = data.result?.payloads || [];
+      const responseText = payloads.map((p: any) => p.text || '').join('\n');
 
       return {
         success: true,
         data: {
-          response: data.response || data.text || data,
-          session: data.session || 'main',
-          model: data.model,
-          tokens: data.tokens,
+          response: responseText,
+          runId: data.runId,
+          summary: data.summary,
+          provider: data.result?.meta?.executionTrace?.winnerProvider,
+          model: data.result?.meta?.executionTrace?.winnerModel,
           skillId: metadata.id
         }
       };
     } catch (error: any) {
-      if (error.response) {
-        const status = error.response.status;
-        if (status === 401) {
+      if (error.stderr) {
+        const stderr = error.stderr.toString();
+        if (stderr.includes('No API key found')) {
           throw new Error(
-            'OpenClaw authentication failed. ' +
-            'Set OPENCLAW_TOKEN environment variable or run `openclaw config set gateway.token <token>` inside the container.'
+            'OpenClaw has no API key configured for the selected provider. ' +
+            'Run `agent-devkit start` to auto-configure with your environment key, ' +
+            'or set it manually inside the container.'
           );
         }
-        if (status === 404) {
-          throw new Error(
-            'OpenClaw message endpoint not found (404). ' +
-            'The gateway may still be initializing or the API route has changed.'
-          );
+        if (stderr.includes('ECONNREFUSED') || stderr.includes('GatewayClientRequestError')) {
+          throw new Error('OpenClaw gateway error. The container may still be initializing.');
         }
-        if (status >= 500) {
-          throw new Error(`OpenClaw gateway error (${status}): ${error.response.data?.message || 'Internal server error'}`);
-        }
-        throw new Error(`OpenClaw request failed (${status}): ${error.response.data?.message || error.message}`);
+        throw new Error(`OpenClaw execution failed: ${stderr}`);
       }
-
-      if (error.code === 'ECONNREFUSED') {
-        throw new Error('OpenClaw connection refused. Container may have stopped.');
-      }
-      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+      if (error.message?.includes('timed out')) {
         throw new Error('OpenClaw request timed out. The agent may be busy or the LLM provider is slow.');
       }
-
       throw new Error(`OpenClaw execution failed: ${error.message}`);
     }
   }

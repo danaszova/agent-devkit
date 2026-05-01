@@ -11,6 +11,8 @@ interface StartOptions {
   checkPorts?: boolean;
 }
 
+const CONTAINER_NAME = 'agent-devkit-openclaw';
+
 export async function startCommand(options: StartOptions): Promise<void> {
   console.log(chalk.bold.blue('\n🚀 Starting agent-devkit environment...\n'));
 
@@ -80,11 +82,11 @@ export async function startCommand(options: StartOptions): Promise<void> {
       throw error;
     }
 
-    // Auto-onboard OpenClaw when running detached
+    // Auto-configure OpenClaw when running detached
     if (options.detached) {
       await setupOpenClaw(spinner);
     } else {
-      console.log(chalk.gray('\nℹ️  Running in foreground mode. Auto-onboarding is skipped.'));
+      console.log(chalk.gray('\nℹ️  Running in foreground mode. Auto-configuration is skipped.'));
       console.log(chalk.gray('   Use `agent-devkit start -d` for automatic OpenClaw setup.'));
     }
 
@@ -112,16 +114,14 @@ export async function startCommand(options: StartOptions): Promise<void> {
 }
 
 /**
- * Automatically sets up OpenClaw if it exists in the compose stack and
- * hasn't been onboarded yet. Requires CLAUDE_API_KEY or OPENAI_API_KEY.
+ * Automatically configures OpenClaw if it exists in the compose stack.
+ * Handles both fresh onboarding and re-configuring an existing install
+ * to use the available API key (e.g., DeepSeek).
  */
 async function setupOpenClaw(spinner: ora.Ora): Promise<void> {
-  const containerName = 'agent-devkit-openclaw';
-  const configPath = '/home/node/.openclaw/openclaw.json';
-
   // Check if OpenClaw container is part of this stack
   try {
-    execSync(`docker ps -q -f name=${containerName}`, { stdio: 'pipe' });
+    execSync(`docker ps -q -f name=${CONTAINER_NAME}`, { stdio: 'pipe' });
   } catch {
     // Container doesn't exist — OpenClaw not in this compose file
     return;
@@ -131,18 +131,42 @@ async function setupOpenClaw(spinner: ora.Ora): Promise<void> {
   spinner.start('Waiting for OpenClaw container to initialize...');
   await sleep(4000);
 
-  // Check if OpenClaw is already configured
+  // Fix workspace permissions (the volume may have root-owned files from previous runs)
+  spinner.start('Fixing OpenClaw workspace permissions...');
   try {
-    execSync(`docker exec ${containerName} test -f ${configPath}`, { stdio: 'ignore' });
-    spinner.succeed('OpenClaw is already onboarded');
-
-    // Even if onboarded, wait for the gateway to be responsive
-    await waitForOpenClawGateway(spinner);
-    return;
+    execSync(`docker exec --user root ${CONTAINER_NAME} chown -R node:node /home/node/.openclaw/workspace`, {
+      stdio: 'pipe'
+    });
+    spinner.succeed('Workspace permissions fixed');
   } catch {
-    // Not yet configured — proceed with onboarding
+    spinner.warn('Could not fix workspace permissions (may not be needed)');
   }
 
+  const configPath = '/home/node/.openclaw/openclaw.json';
+
+  // Check if OpenClaw is already configured
+  let isOnboarded = false;
+  try {
+    execSync(`docker exec ${CONTAINER_NAME} test -f ${configPath}`, { stdio: 'ignore' });
+    isOnboarded = true;
+  } catch {
+    // Not yet configured
+  }
+
+  if (!isOnboarded) {
+    await onboardOpenClaw(spinner);
+  } else {
+    await configureOpenClawModel(spinner);
+  }
+
+  // Wait for the gateway to become responsive
+  await waitForOpenClawGateway(spinner);
+}
+
+/**
+ * Runs first-time onboarding for a fresh OpenClaw container.
+ */
+async function onboardOpenClaw(spinner: ora.Ora): Promise<void> {
   // Determine which provider key is available
   const claudeKey = process.env.CLAUDE_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -165,12 +189,12 @@ async function setupOpenClaw(spinner: ora.Ora): Promise<void> {
     console.log(chalk.gray('   • ZAI_API_KEY (or GLM_API_KEY)'));
     console.log(chalk.gray('   • QWEN_API_KEY (or QWEN_CODE_API_KEY)'));
     console.log(chalk.yellow('\n   Or onboard manually with:'));
-    console.log(chalk.gray(`   docker exec -it ${containerName} openclaw onboard`));
+    console.log(chalk.gray(`   docker exec -it ${CONTAINER_NAME} openclaw onboard`));
     return;
   }
 
   // Build the non-interactive onboarding command
-  let onboardCmd = 'openclaw onboard --non-interactive --mode local --gateway-port 18789';
+  let onboardCmd = 'openclaw onboard --non-interactive --accept-risk --flow quickstart --gateway-port 18789';
 
   if (claudeKey) {
     onboardCmd += ` --auth-choice apiKey --anthropic-api-key "${claudeKey}"`;
@@ -181,7 +205,6 @@ async function setupOpenClaw(spinner: ora.Ora): Promise<void> {
   } else if (deepseekKey) {
     onboardCmd += ` --auth-choice deepseek-api-key --deepseek-api-key "${deepseekKey}"`;
   } else if (kimiKey) {
-    // Prefer kimi-code-api-key if available, otherwise fall back to moonshot
     const authChoice = process.env.KIMI_CODE_API_KEY ? 'kimi-code-api-key' : 'moonshot-api-key';
     const flagName = process.env.KIMI_CODE_API_KEY ? 'kimi-code-api-key' : 'moonshot-api-key';
     onboardCmd += ` --auth-choice ${authChoice} --${flagName} "${kimiKey}"`;
@@ -194,9 +217,9 @@ async function setupOpenClaw(spinner: ora.Ora): Promise<void> {
   // Run onboarding inside the container
   spinner.start('Running OpenClaw onboarding...');
   try {
-    execSync(`docker exec ${containerName} ${onboardCmd}`, {
+    execSync(`docker exec ${CONTAINER_NAME} ${onboardCmd}`, {
       stdio: 'pipe',
-      timeout: 60000,
+      timeout: 120000,
       encoding: 'utf-8'
     });
     spinner.succeed('OpenClaw onboarded successfully');
@@ -206,12 +229,70 @@ async function setupOpenClaw(spinner: ora.Ora): Promise<void> {
       console.log(chalk.gray(error.stderr));
     }
     console.log(chalk.yellow('\nYou can onboard manually with:'));
-    console.log(chalk.gray(`  docker exec -it ${containerName} openclaw onboard`));
+    console.log(chalk.gray(`  docker exec -it ${CONTAINER_NAME} openclaw onboard`));
+  }
+}
+
+/**
+ * Configures an already-onboarded OpenClaw instance to use the available
+ * provider API key by setting the default agent model.
+ */
+async function configureOpenClawModel(spinner: ora.Ora): Promise<void> {
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const claudeKey = process.env.CLAUDE_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  const kimiKey = process.env.KIMI_CODE_API_KEY || process.env.MOONSHOT_API_KEY;
+
+  // Determine which provider to use (priority order)
+  let model: string | null = null;
+  if (deepseekKey) model = 'deepseek/deepseek-chat';
+  else if (claudeKey) model = 'anthropic/claude-sonnet-4-20250514';
+  else if (openaiKey) model = 'openai/gpt-4o';
+  else if (openrouterKey) model = 'openrouter/openai/gpt-4o';
+  else if (kimiKey) model = 'moonshot/moonshot-v1-8k';
+
+  if (!model) {
+    spinner.warn('OpenClaw is onboarded but no recognized API key is set');
     return;
   }
 
-  // Wait for the gateway to become responsive
-  await waitForOpenClawGateway(spinner);
+  // Check current default model
+  let currentModel = '';
+  try {
+    const output = execSync(
+      `docker exec ${CONTAINER_NAME} openclaw infer model auth status`,
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 30000 }
+    );
+    const status = JSON.parse(output);
+    currentModel = status.defaultModel || '';
+  } catch {
+    // Couldn't read status, proceed anyway
+  }
+
+  if (currentModel && !currentModel.startsWith('openai/')) {
+    // Already configured for a non-OpenAI provider, assume it's fine
+    spinner.succeed(`OpenClaw already configured for ${currentModel}`);
+    return;
+  }
+
+  spinner.start(`Configuring OpenClaw to use ${model}...`);
+  try {
+    execSync(
+      `docker exec ${CONTAINER_NAME} openclaw config set agents.defaults.model "${model}"`,
+      { stdio: 'pipe', timeout: 10000 }
+    );
+    spinner.succeed(`OpenClaw model set to ${model}`);
+
+    // Restart the container to apply the new model config
+    spinner.start('Restarting OpenClaw gateway...');
+    execSync(`docker restart ${CONTAINER_NAME}`, { stdio: 'pipe' });
+    await sleep(6000);
+    spinner.succeed('OpenClaw gateway restarted');
+  } catch (error: any) {
+    spinner.fail('Failed to configure OpenClaw model');
+    if (error.stderr) console.log(chalk.gray(error.stderr));
+  }
 }
 
 /**
@@ -222,14 +303,14 @@ async function waitForOpenClawGateway(spinner: ora.Ora, maxAttempts = 30): Promi
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const output = execSync('curl -sf http://localhost:18789/api/status', {
+      const output = execSync('curl -sf http://localhost:18789/healthz', {
         encoding: 'utf-8',
         timeout: 3000,
         stdio: 'pipe'
       });
       const data = JSON.parse(output);
-      if (data.status === 'ok') {
-        spinner.succeed(`OpenClaw gateway ready (v${data.version || 'unknown'})`);
+      if (data.ok === true) {
+        spinner.succeed('OpenClaw gateway ready');
         return;
       }
     } catch {

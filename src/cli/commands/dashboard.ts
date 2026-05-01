@@ -16,13 +16,16 @@ export async function dashboardCommand(): Promise<void> {
     process.exit(1);
   }
 
-  // Retrieve the gateway auth token from inside the container
+  // Retrieve the gateway auth token from the config file inside the container
+  // (openclaw config get returns __OPENCLAW_REDACTED__, so we parse JSON directly)
   let token = '';
   try {
-    token = execSync(
-      `docker exec ${CONTAINER_NAME} openclaw config get gateway.auth.token`,
+    const configJson = execSync(
+      `docker exec ${CONTAINER_NAME} cat /home/node/.openclaw/openclaw.json`,
       { encoding: 'utf-8', stdio: 'pipe' }
     ).trim();
+    const config = JSON.parse(configJson);
+    token = config.gateway?.auth?.token || '';
   } catch {
     console.log(chalk.yellow('⚠️  Could not retrieve gateway token'));
   }

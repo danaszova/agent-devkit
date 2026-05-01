@@ -1,8 +1,7 @@
-import axios from 'axios';
+import { execSync } from 'child_process';
 import { skillRegistry } from './registry';
 
-const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL || 'http://localhost:18789';
-const OPENCLAW_TIMEOUT = parseInt(process.env.OPENCLAW_TIMEOUT || '5000', 10);
+const CONTAINER_NAME = 'agent-devkit-openclaw';
 
 export class SkillDiscoveryService {
   private lastRefresh: Date | null = null;
@@ -17,7 +16,7 @@ export class SkillDiscoveryService {
     try {
       skillRegistry.clear();
 
-      // Load from Local examples (mocking local filesystem discovery)
+      // Load local examples
       this.registerLocalSkills();
 
       // Query OpenClaw
@@ -63,57 +62,76 @@ export class SkillDiscoveryService {
   }
 
   private async queryOpenClaw(): Promise<void> {
+    // Check if container is running
     try {
-      const statusRes = await axios.get(`${OPENCLAW_BASE_URL}/api/status`, {
-        timeout: OPENCLAW_TIMEOUT
-      });
+      execSync(`docker ps -q -f name=${CONTAINER_NAME}`, { stdio: 'pipe' });
+    } catch {
+      this.openclawAvailable = false;
+      console.warn(
+        '[Discovery] OpenClaw container is not running. ' +
+        'Start it with: agent-devkit start'
+      );
+      return;
+    }
 
-      if (statusRes.data?.status === 'ok') {
-        this.openclawAvailable = true;
-        console.log(
-          `[Discovery] OpenClaw connected (v${statusRes.data.version || 'unknown'}, uptime: ${statusRes.data.uptime || 'N/A'})`
-        );
-
-        try {
-          const skillsRes = await axios.get(`${OPENCLAW_BASE_URL}/api/skills`, {
-            timeout: OPENCLAW_TIMEOUT
-          });
-
-          const skills = skillsRes.data;
-          if (Array.isArray(skills) && skills.length > 0) {
-            skills.forEach((skill: any) => {
-              skillRegistry.register({
-                id: `openclaw.${skill.id || skill.name}`,
-                name: skill.name || skill.id || 'Unnamed Skill',
-                description: skill.description || 'OpenClaw managed skill',
-                provider: 'openclaw',
-                parameters: skill.parameters || skill.config || {}
-              });
-            });
-          } else {
-            // OpenClaw is alive but returned no skills — register fallback placeholders
-            this.registerFallbackOpenClawSkills();
-          }
-        } catch (skillsErr: any) {
-          console.warn('[Discovery] OpenClaw is up, but /api/skills failed:', skillsErr.message);
-          this.registerFallbackOpenClawSkills();
+    try {
+      const output = execSync(
+        `docker exec ${CONTAINER_NAME} openclaw skills list --json`,
+        {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 15000
         }
+      );
+
+      const data = JSON.parse(output);
+      const skills = data.skills || [];
+
+      if (skills.length > 0) {
+        this.openclawAvailable = true;
+        let readyCount = 0;
+
+        skills.forEach((skill: any) => {
+          // Only register skills that are eligible (have required binaries/env)
+          // and not explicitly disabled
+          if (skill.eligible && !skill.disabled) {
+            readyCount++;
+            skillRegistry.register({
+              id: `openclaw.${skill.name}`,
+              name: skill.name,
+              description: skill.description || 'OpenClaw managed skill',
+              provider: 'openclaw',
+              parameters: {
+                emoji: skill.emoji,
+                source: skill.source,
+                homepage: skill.homepage
+              }
+            });
+          }
+        });
+
+        console.log(
+          `[Discovery] OpenClaw connected (${readyCount}/${skills.length} skills ready)`
+        );
       } else {
-        this.openclawAvailable = false;
-        console.warn('[Discovery] OpenClaw status endpoint returned unexpected response');
+        this.openclawAvailable = true;
+        console.log('[Discovery] OpenClaw connected (no skills found)');
+        this.registerFallbackOpenClawSkills();
       }
     } catch (error: any) {
       this.openclawAvailable = false;
-      if (error.code === 'ECONNREFUSED') {
+      if (error.stderr?.includes('not running') || error.message?.includes('No such container')) {
         console.warn(
-          `[Discovery] OpenClaw is not running at ${OPENCLAW_BASE_URL}. ` +
+          '[Discovery] OpenClaw container is not running. ' +
           'Start it with: agent-devkit start'
         );
       } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
-        console.warn('[Discovery] OpenClaw connection timed out — container may still be starting');
+        console.warn('[Discovery] OpenClaw skills list timed out');
       } else {
         console.warn('[Discovery] OpenClaw discovery error:', error.message);
       }
+      // Register fallback placeholders so the registry isn't empty
+      this.registerFallbackOpenClawSkills();
     }
   }
 

@@ -25,7 +25,7 @@ services:
       - OPENCLAW_TOKEN=${OPENCLAW_TOKEN:-}
     # --allow-unconfigured lets the gateway start without full onboarding.
     # The openclaw gateway command stays in the foreground by default, keeping the container alive.
-    command: ["openclaw", "gateway", "--allow-unconfigured"]
+    command: ["sh", "-c", "chown -R node:node /home/node/.openclaw/workspace 2>/dev/null || true; exec openclaw gateway --allow-unconfigured"]
     volumes:
       # OpenClaw stores config and workspace under /home/node/.openclaw by default
       - agent-devkit-openclaw-data:/home/node/.openclaw
@@ -33,8 +33,7 @@ services:
     networks:
       - agent-devkit-network
     healthcheck:
-      # Use the real OpenClaw status endpoint (no auth required)
-      test: ["CMD", "curl", "-f", "http://localhost:18789/api/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:18789/healthz"]
       interval: 30s
       timeout: 10s
       retries: 5

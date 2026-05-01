@@ -2,15 +2,12 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { execSync } from 'child_process';
-import axios from 'axios';
 import { discoveryService } from '../../orchestration/discovery';
 import { skillRegistry } from '../../orchestration/registry';
 import { executor } from '../../orchestration/executor';
 import { router } from '../../orchestration/router';
 
 const CONTAINER_NAME = 'agent-devkit-openclaw';
-const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL || 'http://localhost:18789';
-const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN || '';
 
 export function registerSkillsCommands(program: Command) {
   const skillsCmd = program
@@ -154,7 +151,7 @@ export function registerSkillsCommands(program: Command) {
     });
 
   // ─────────────────────────────────────────────────────────────
-  // NEW: OpenClaw skill management commands
+  // OpenClaw skill management commands
   // ─────────────────────────────────────────────────────────────
 
   skillsCmd
@@ -209,52 +206,39 @@ export function registerSkillsCommands(program: Command) {
     .command('installed')
     .description('List skills currently installed in OpenClaw')
     .action(async () => {
-      console.log(chalk.blue('📦 Installed OpenClaw skills\n'));
-
-      // Try the REST API first (fastest, no docker exec needed)
-      try {
-        const response = await axios.get(`${OPENCLAW_BASE_URL}/api/skills`, {
-          headers: OPENCLAW_TOKEN ? { Authorization: `Bearer ${OPENCLAW_TOKEN}` } : {},
-          timeout: 5000
-        });
-
-        const skills = response.data;
-        if (Array.isArray(skills) && skills.length > 0) {
-          skills.forEach((skill: any) => {
-            const name = skill.name || skill.id || 'Unnamed';
-            const desc = skill.description || '';
-            console.log(chalk.bold(`  • ${name}`));
-            if (desc) console.log(chalk.gray(`    ${desc}`));
-          });
-          console.log(chalk.gray(`\nTotal: ${skills.length} skill(s)`));
-          return;
-        }
-      } catch {
-        // API failed or returned empty — fall through to filesystem check
-      }
-
-      // Fallback: list the skills directory inside the container
-      if (isOpenClawRunning()) {
-        try {
-          const output = execSync(
-            `docker exec ${CONTAINER_NAME} ls -1 /home/node/.openclaw/skills/ 2>/dev/null || echo ""`,
-            { encoding: 'utf-8', stdio: 'pipe' }
-          ).trim();
-
-          if (output) {
-            const lines = output.split('\n').filter(l => l.trim());
-            lines.forEach(line => console.log(chalk.bold(`  • ${line}`)));
-            console.log(chalk.gray(`\nTotal: ${lines.length} skill(s)`));
-          } else {
-            console.log(chalk.yellow('No custom skills installed yet.'));
-          }
-        } catch {
-          console.log(chalk.yellow('Could not retrieve installed skills list.'));
-        }
-      } else {
+      if (!isOpenClawRunning()) {
         console.log(chalk.red('❌ OpenClaw container is not running'));
         console.log(chalk.yellow('Start it with: agent-devkit start'));
         process.exit(1);
+      }
+
+      console.log(chalk.blue('📦 Installed OpenClaw skills\n'));
+
+      try {
+        const output = execSync(
+          `docker exec ${CONTAINER_NAME} openclaw skills list --json`,
+          { encoding: 'utf-8', stdio: 'pipe', timeout: 15000 }
+        );
+
+        const data = JSON.parse(output);
+        const skills = data.skills || [];
+        const installed = skills.filter((s: any) => s.source !== 'openclaw-bundled');
+
+        if (installed.length > 0) {
+          installed.forEach((skill: any) => {
+            const name = skill.name || 'Unnamed';
+            const desc = skill.description || '';
+            const status = skill.eligible ? '✓' : '△';
+            console.log(chalk.bold(`  ${status} ${name}`));
+            if (desc) console.log(chalk.gray(`    ${desc}`));
+          });
+          console.log(chalk.gray(`\nTotal: ${installed.length} installed skill(s)`));
+        } else {
+          console.log(chalk.yellow('No custom skills installed yet.'));
+        }
+      } catch (error: any) {
+        console.log(chalk.yellow('Could not retrieve installed skills list.'));
+        if (error.stderr) console.log(chalk.gray(error.stderr));
       }
     });
 
@@ -350,38 +334,21 @@ export function registerSkillsCommands(program: Command) {
         process.exit(1);
       }
 
-      // Schedule via OpenClaw cron API
+      // Schedule via OpenClaw cron CLI
       console.log(chalk.blue('Scheduling daily cleanup...'));
       try {
-        const token = execSync(
-          `docker exec ${CONTAINER_NAME} openclaw config get gateway.auth.token`,
-          { encoding: 'utf-8', stdio: 'pipe' }
-        ).trim();
-
-        const cronPayload = {
-          schedule: answers.schedule,
-          message: 'Run bash: source /home/node/.openclaw/.env && python3 /home/node/.openclaw/workspace/skills/inbox-cleaner/clean_inbox.py',
-          session: 'main'
-        };
-
-        await axios.post(
-          `${OPENCLAW_BASE_URL}/api/cron`,
-          cronPayload,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {})
-            },
-            timeout: 10000
-          }
+        execSync(
+          `docker exec ${CONTAINER_NAME} openclaw cron add ` +
+          `--name inbox-cleaner ` +
+          `--cron "${answers.schedule}" ` +
+          `--message "Run bash: source /home/node/.openclaw/.env && python3 /home/node/.openclaw/workspace/skills/inbox-cleaner/clean_inbox.py" ` +
+          `--session main`,
+          { stdio: 'pipe', timeout: 15000 }
         );
-
         console.log(chalk.green(`✅ Scheduled for "${answers.schedule}"`));
       } catch (error: any) {
-        console.warn(chalk.yellow('\n⚠️  Could not auto-schedule via OpenClaw API'));
-        if (error.response?.status === 401) {
-          console.log(chalk.gray('Authentication required. Set OPENCLAW_TOKEN or configure gateway token.'));
-        }
+        console.warn(chalk.yellow('\n⚠️  Could not auto-schedule via OpenClaw cron'));
+        if (error.stderr) console.log(chalk.gray(error.stderr));
         console.log(chalk.white('\nManual scheduling options:'));
         console.log(chalk.gray('  Option A - Add to your host crontab:'));
         console.log(chalk.gray(`    ${answers.schedule} docker exec ${CONTAINER_NAME} bash -c 'source /home/node/.openclaw/.env && python3 /home/node/.openclaw/workspace/skills/inbox-cleaner/clean_inbox.py'`));
