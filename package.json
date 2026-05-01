@@ -4,7 +4,7 @@
   "description": "Secure Docker-based development environment for AI agents - vendor-agnostic, safety-first, production-ready",
   "main": "dist/index.js",
   "bin": {
-    "agent-devkit": "./dist/cli/index.js"
+    "agent-devkit": "./dist/src/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
