@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent DevKit Manager</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent2: #818cf8;
+      --success: #34d399;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+    header .badge {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    main { padding: 2rem; max-width: 1200px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: var(--accent); }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .card-title { font-size: 1.1rem; font-weight: 600; }
+    .status {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .status.running { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+    .status.stopped { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+    .status.unhealthy { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+    .meta { color: var(--muted); font-size: 0.875rem; margin-bottom: 1rem; }
+    .meta p { margin-bottom: 0.35rem; }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    button {
+      cursor: pointer;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #0f172a; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-danger { background: rgba(248, 113, 113, 0.2); color: var(--danger); }
+    .btn-success { background: rgba(52, 211, 153, 0.2); color: var(--success); }
+    .empty {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: var(--muted);
+    }
+    .empty h2 { color: var(--text); margin-bottom: 0.5rem; }
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center; z-index: 50;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 2rem; width: 90%; max-width: 480px;
+    }
+    .modal h2 { margin-bottom: 1rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-size: 0.875rem; color: var(--muted); margin-bottom: 0.35rem; }
+    .form-group input, .form-group select {
+      width: 100%; padding: 0.6rem; border-radius: 8px;
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      font-size: 0.95rem;
+    }
+    .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem; }
+    .toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem;
+      padding: 0.75rem 1.25rem; border-radius: 8px;
+      font-size: 0.875rem; font-weight: 500;
+      transform: translateY(120%); transition: transform 0.3s ease;
+      z-index: 100;
+    }
+    .toast.show { transform: translateY(0); }
+    .toast.success { background: var(--success); color: #064e3b; }
+    .toast.error { background: var(--danger); color: #450a0a; }
+    .section { margin-bottom: 2rem; }
+    .section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .skill-tag {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      background: rgba(56, 189, 248, 0.1); color: var(--accent);
+      padding: 0.25rem 0.6rem; border-radius: 6px; font-size: 0.75rem; margin: 0.15rem;
+    }
+    .spinner {
+      width: 1.25rem; height: 1.25rem; border: 2px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.8s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎛️ Agent DevKit Manager</h1>
+    <div style="display:flex;gap:1rem;align-items:center;">
+      <span id="statusBadge" class="badge">Checking…</span>
+      <button class="btn-primary" onclick="openCreateModal()">+ New Agent</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="section">
+      <div class="section-title">🦞 OpenClaw Agents</div>
+      <div id="agentsGrid" class="grid"><div class="empty"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🐳 Containers</div>
+      <div id="containersGrid" class="grid"><div class="empty"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🧩 OpenClaw Skills</div>
+      <div id="skillsList" style="display:flex;flex-wrap:wrap;gap:0.5rem;"><span class="spinner"></span></div>
+    </div>
+  </main>
+
+  <div id="createModal" class="modal-overlay" onclick="if(event.target===this)closeCreateModal()">
+    <div class="modal">
+      <h2>Create New Agent</h2>
+      <div class="form-group">
+        <label>Agent Name</label>
+        <input id="newAgentName" placeholder="e.g. research-assistant" />
+      </div>
+      <div class="form-group">
+        <label>Model (optional)</label>
+        <select id="newAgentModel">
+          <option value="">Default (deepseek/deepseek-chat)</option>
+          <option value="deepseek/deepseek-chat">DeepSeek Chat</option>
+          <option value="anthropic/claude-sonnet-4-20250514">Claude Sonnet</option>
+          <option value="openai/gpt-4o">GPT-4o</option>
+          <option value="openrouter/openai/gpt-4o">OpenRouter GPT-4o</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeCreateModal()">Cancel</button>
+        <button class="btn-primary" onclick="createAgent()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    async function fetchJSON(url, opts) {
+      try {
+        const res = await fetch(url, opts);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        return data;
+      } catch (e) {
+        showToast(e.message, 'error');
+        throw e;
+      }
+    }
+
+    function showToast(msg, type='success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast ' + type + ' show';
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    async function loadStatus() {
+      const data = await fetchJSON('/api/status');
+      const badge = document.getElementById('statusBadge');
+      badge.textContent = data.openclawRunning ? 'OpenClaw Online' : 'OpenClaw Offline';
+      badge.style.color = data.openclawRunning ? 'var(--success)' : 'var(--danger)';
+      return data;
+    }
+
+    async function loadAgents() {
+      const grid = document.getElementById('agentsGrid');
+      try {
+        const agents = await fetchJSON('/api/agents');
+        if (!agents.length) {
+          grid.innerHTML = `<div class="empty"><h2>No agents yet</h2><p>Create your first agent to get started.</p></div>`;
+          return;
+        }
+        grid.innerHTML = agents.map(a => `
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">${a.id}</div>
+              <span class="status running">${a.isDefault ? 'default' : 'active'}</span>
+            </div>
+            <div class="meta">
+              <p>🧠 ${a.model || 'default'}</p>
+              <p>📁 ${a.workspace}</p>
+              <p>🔗 Bindings: ${a.bindings}</p>
+            </div>
+            <div class="actions">
+              <button class="btn-primary" onclick="chatAgent('${a.id}')">💬 Chat</button>
+              <button class="btn-secondary" onclick="window.open('http://localhost:18789','_blank')">🌐 Dashboard</button>
+              ${a.isDefault ? '' : `<button class="btn-danger" onclick="deleteAgent('${a.id}')">🗑 Delete</button>`}
+            </div>
+          </div>
+        `).join('');
+      } catch {
+        grid.innerHTML = `<div class="empty"><h2>OpenClaw not running</h2><p>Start it with: agent-devkit start</p></div>`;
+      }
+    }
+
+    async function loadContainers() {
+      const grid = document.getElementById('containersGrid');
+      try {
+        const containers = await fetchJSON('/api/containers');
+        if (!containers.length) {
+          grid.innerHTML = `<div class="empty"><h2>No containers</h2><p>Run agent-devkit start to launch containers.</p></div>`;
+          return;
+        }
+        grid.innerHTML = containers.map(c => {
+          const statusClass = c.state === 'running' ? 'running' : (c.status.includes('unhealthy') ? 'unhealthy' : 'stopped');
+          return `
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">${c.name}</div>
+              <span class="status ${statusClass}">${statusClass}</span>
+            </div>
+            <div class="meta">
+              <p>🖼 ${c.image}</p>
+              <p>📊 ${c.status}</p>
+              <p>🔌 ${c.ports || 'none'}</p>
+            </div>
+          </div>
+        `}).join('');
+      } catch {
+        grid.innerHTML = `<div class="empty"><h2>Docker not available</h2><p>Make sure Docker is running.</p></div>`;
+      }
+    }
+
+    async function loadSkills() {
+      const el = document.getElementById('skillsList');
+      try {
+        const skills = await fetchJSON('/api/skills');
+        const ready = skills.filter(s => s.eligible && !s.disabled);
+        el.innerHTML = ready.map(s => `
+          <span class="skill-tag" title="${s.description || ''}">${s.emoji || '🔧'} ${s.name}</span>
+        `).join('');
+      } catch {
+        el.innerHTML = '<span style="color:var(--muted)">OpenClaw not running</span>';
+      }
+    }
+
+    function chatAgent(id) {
+      window.open(`http://localhost:18789/?agent=${id}`, '_blank');
+    }
+
+    function openCreateModal() { document.getElementById('createModal').classList.add('open'); }
+    function closeCreateModal() { document.getElementById('createModal').classList.remove('open'); }
+
+    async function createAgent() {
+      const name = document.getElementById('newAgentName').value.trim();
+      const model = document.getElementById('newAgentModel').value;
+      if (!name) { showToast('Name is required', 'error'); return; }
+      try {
+        await fetchJSON('/api/agents/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, model })
+        });
+        showToast(`Agent "${name}" created`);
+        closeCreateModal();
+        document.getElementById('newAgentName').value = '';
+        loadAgents();
+      } catch (e) {
+        // error already toasted
+      }
+    }
+
+    async function deleteAgent(id) {
+      if (!confirm(`Delete agent "${id}"? This cannot be undone.`)) return;
+      try {
+        await fetchJSON('/api/agents/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        showToast(`Agent "${id}" deleted`);
+        loadAgents();
+      } catch {}
+    }
+
+    async function refresh() {
+      await loadStatus();
+      await loadAgents();
+      await loadContainers();
+      await loadSkills();
+    }
+
+    refresh();
+    setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

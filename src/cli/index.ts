@@ -14,6 +14,7 @@ import { pauseCommand } from './commands/pause';
 import { resumeCommand } from './commands/resume';
 import { registerSkillsCommands } from './commands/skills';
 import { dashboardCommand } from './commands/dashboard';
+import { uiCommand } from './commands/ui';
 
 const VERSION = '0.1.0';
 
@@ -86,6 +87,12 @@ program
   .command('dashboard')
   .description('Open the OpenClaw web dashboard in your browser')
   .action(dashboardCommand);
+
+// UI Manager command
+program
+  .command('ui')
+  .description('Open the Agent DevKit Manager UI in your browser')
+  .action(uiCommand);
 
 // Parse arguments
 program.parse(process.argv);
