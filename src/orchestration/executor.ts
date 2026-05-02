@@ -6,7 +6,9 @@ export interface ExecutionOptions {
   timeoutMs?: number;
 }
 
-const CONTAINER_NAME = 'agent-devkit-openclaw';
+const OPENCLAW_CONTAINER = 'agent-devkit-openclaw';
+const HERMES_API_URL = process.env.HERMES_API_URL || 'http://localhost:8642';
+const HERMES_API_KEY = process.env.HERMES_API_KEY || 'hermes-devkit-key';
 
 export class SkillExecutor {
   /**
@@ -78,7 +80,7 @@ export class SkillExecutor {
   private async executeOpenClawSkill(metadata: SkillMetadata, input: any): Promise<SkillResult> {
     // Verify OpenClaw container is running
     try {
-      execSync(`docker ps -q -f name=${CONTAINER_NAME}`, { stdio: 'pipe' });
+      execSync(`docker ps -q -f name=${OPENCLAW_CONTAINER}`, { stdio: 'pipe' });
     } catch {
       throw new Error(
         `OpenClaw container is not running. ` +
@@ -90,7 +92,7 @@ export class SkillExecutor {
 
     try {
       const output = execSync(
-        `docker exec ${CONTAINER_NAME} openclaw agent --session-id main --message ${JSON.stringify(message)} --json --timeout 120`,
+        `docker exec ${OPENCLAW_CONTAINER} openclaw agent --session-id main --message ${JSON.stringify(message)} --json --timeout 120`,
         {
           encoding: 'utf-8',
           stdio: 'pipe',
@@ -155,18 +157,61 @@ export class SkillExecutor {
   }
 
   private async executeHermesSkill(metadata: SkillMetadata, input: any): Promise<SkillResult> {
-    // Hermes integration intentionally mocked while we focus on OpenClaw
-    return new Promise(resolve => {
-      setTimeout(() => {
-        resolve({
-          success: true,
-          data: {
-            result: `Hermes integration not yet implemented. Skill: ${metadata.id}`,
-            inputReceived: input
-          }
-        });
-      }, 600);
-    });
+    const inputDesc = typeof input === 'string' ? input : JSON.stringify(input);
+
+    const skillActions: Record<string, string> = {
+      'hermes.chat': 'Respond to the user\'s message',
+      'hermes.browser': 'Browse the web and extract information',
+      'hermes.terminal': 'Execute a shell command and return the output',
+      'hermes.search': 'Search the web for information'
+    };
+
+    const action = skillActions[metadata.id] || metadata.description || 'Perform the requested task';
+    const message = `${action}. Input: ${inputDesc}`;
+
+    try {
+      const output = execSync(
+        `curl -s -X POST ${HERMES_API_URL}/v1/chat/completions ` +
+        `-H "Authorization: Bearer ${HERMES_API_KEY}" ` +
+        `-H "Content-Type: application/json" ` +
+        `-d ${JSON.stringify(JSON.stringify({
+          model: 'hermes-agent',
+          messages: [{ role: 'user', content: message }],
+          stream: false
+        }))}`,
+        {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 120000
+        }
+      );
+
+      const data = JSON.parse(output);
+
+      if (data.error) {
+        throw new Error(`Hermes API error: ${data.error.message || JSON.stringify(data.error)}`);
+      }
+
+      const content = data.choices?.[0]?.message?.content || '';
+
+      return {
+        success: true,
+        data: {
+          response: content,
+          model: data.model,
+          usage: data.usage,
+          skillId: metadata.id
+        }
+      };
+    } catch (error: any) {
+      if (error.stderr) {
+        throw new Error(`Hermes execution failed: ${error.stderr}`);
+      }
+      if (error.message?.includes('timed out')) {
+        throw new Error('Hermes request timed out. The agent may be busy or the LLM provider is slow.');
+      }
+      throw new Error(`Hermes execution failed: ${error.message}`);
+    }
   }
 }
 

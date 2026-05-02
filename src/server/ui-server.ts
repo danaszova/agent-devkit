@@ -5,11 +5,23 @@ import { execSync } from 'child_process';
 import chalk from 'chalk';
 
 const PORT = process.env.AGENT_DEVKIT_UI_PORT || '18790';
-const CONTAINER = 'agent-devkit-openclaw';
+const OPENCLAW_CONTAINER = 'agent-devkit-openclaw';
+const HERMES_CONTAINER = 'agent-devkit-hermes';
+const HERMES_API_URL = process.env.HERMES_API_URL || 'http://localhost:8642';
+const HERMES_API_KEY = process.env.HERMES_API_KEY || 'hermes-devkit-key';
 
-function isContainerRunning(): boolean {
+function isOpenClawRunning(): boolean {
   try {
-    execSync(`docker ps -q -f name=${CONTAINER}`, { stdio: 'pipe' });
+    execSync(`docker ps -q -f name=${OPENCLAW_CONTAINER}`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isHermesRunning(): boolean {
+  try {
+    execSync(`docker ps -q -f name=${HERMES_CONTAINER}`, { stdio: 'pipe' });
     return true;
   } catch {
     return false;
@@ -17,7 +29,7 @@ function isContainerRunning(): boolean {
 }
 
 function dockerExec(cmd: string, timeout = 15000): string {
-  return execSync(`docker exec ${CONTAINER} ${cmd}`, {
+  return execSync(`docker exec ${OPENCLAW_CONTAINER} ${cmd}`, {
     encoding: 'utf-8',
     stdio: 'pipe',
     timeout
@@ -37,13 +49,22 @@ function getDashboardUrl(): string {
 
 const API_ROUTES: Record<string, (req: http.IncomingMessage, res: http.ServerResponse, body?: any) => void> = {
   '/api/status': (_req, res) => {
-    const running = isContainerRunning();
+    const openclawRunning = isOpenClawRunning();
+    let hermesRunning = false;
+    try {
+      if (isHermesRunning()) {
+        execSync(`curl -sf ${HERMES_API_URL}/v1/health`, { stdio: 'pipe', timeout: 3000 });
+        hermesRunning = true;
+      }
+    } catch {
+      hermesRunning = false;
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, openclawRunning: running, dashboardUrl: getDashboardUrl() }));
+    res.end(JSON.stringify({ ok: true, openclawRunning, hermesRunning, dashboardUrl: getDashboardUrl() }));
   },
 
   '/api/agents': (_req, res) => {
-    if (!isContainerRunning()) {
+    if (!isOpenClawRunning()) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'OpenClaw container is not running' }));
       return;
@@ -65,7 +86,7 @@ const API_ROUTES: Record<string, (req: http.IncomingMessage, res: http.ServerRes
   },
 
   '/api/agents/create': (_req, res, body) => {
-    if (!isContainerRunning()) {
+    if (!isOpenClawRunning()) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'OpenClaw container is not running' }));
       return;
@@ -90,7 +111,7 @@ const API_ROUTES: Record<string, (req: http.IncomingMessage, res: http.ServerRes
   },
 
   '/api/agents/delete': (_req, res, body) => {
-    if (!isContainerRunning()) {
+    if (!isOpenClawRunning()) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'OpenClaw container is not running' }));
       return;
@@ -112,7 +133,7 @@ const API_ROUTES: Record<string, (req: http.IncomingMessage, res: http.ServerRes
   },
 
   '/api/skills': (_req, res) => {
-    if (!isContainerRunning()) {
+    if (!isOpenClawRunning()) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'OpenClaw container is not running' }));
       return;

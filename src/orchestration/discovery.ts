@@ -1,7 +1,10 @@
 import { execSync } from 'child_process';
 import { skillRegistry } from './registry';
 
-const CONTAINER_NAME = 'agent-devkit-openclaw';
+const OPENCLAW_CONTAINER = 'agent-devkit-openclaw';
+const HERMES_CONTAINER = 'agent-devkit-hermes';
+const HERMES_API_URL = process.env.HERMES_API_URL || 'http://localhost:8642';
+const HERMES_API_KEY = process.env.HERMES_API_KEY || 'hermes-devkit-key';
 
 export class SkillDiscoveryService {
   private lastRefresh: Date | null = null;
@@ -22,8 +25,8 @@ export class SkillDiscoveryService {
       // Query OpenClaw
       await this.queryOpenClaw();
 
-      // Query Hermes (skipped for now — focus is OpenClaw)
-      // await this.queryHermes();
+      // Query Hermes
+      await this.queryHermes();
 
       this.lastRefresh = new Date();
     } catch (err) {
@@ -64,7 +67,7 @@ export class SkillDiscoveryService {
   private async queryOpenClaw(): Promise<void> {
     // Check if container is running
     try {
-      execSync(`docker ps -q -f name=${CONTAINER_NAME}`, { stdio: 'pipe' });
+      execSync(`docker ps -q -f name=${OPENCLAW_CONTAINER}`, { stdio: 'pipe' });
     } catch {
       this.openclawAvailable = false;
       console.warn(
@@ -76,7 +79,7 @@ export class SkillDiscoveryService {
 
     try {
       const output = execSync(
-        `docker exec ${CONTAINER_NAME} openclaw skills list --json`,
+        `docker exec ${OPENCLAW_CONTAINER} openclaw skills list --json`,
         {
           encoding: 'utf-8',
           stdio: 'pipe',
@@ -130,7 +133,6 @@ export class SkillDiscoveryService {
       } else {
         console.warn('[Discovery] OpenClaw discovery error:', error.message);
       }
-      // Register fallback placeholders so the registry isn't empty
       this.registerFallbackOpenClawSkills();
     }
   }
@@ -151,22 +153,47 @@ export class SkillDiscoveryService {
   }
 
   private async queryHermes(): Promise<void> {
-    // Intentionally left mocked — Hermes integration is out of scope for this pass.
     try {
-      skillRegistry.register({
-        id: 'hermes.whatsapp_bridge',
-        name: 'WhatsApp Bridge',
-        description: 'Send and receive WhatsApp messages',
-        provider: 'hermes'
-      });
-      skillRegistry.register({
-        id: 'hermes.calendar',
-        name: 'Calendar Management',
-        description: 'Read and write calendar events',
-        provider: 'hermes'
-      });
-    } catch (error) {
-      console.warn('Failed to discover Hermes skills:', error);
+      execSync(`docker ps -q -f name=${HERMES_CONTAINER}`, { stdio: 'pipe' });
+    } catch {
+      return;
+    }
+
+    try {
+      const output = execSync(
+        `curl -sf ${HERMES_API_URL}/v1/health`,
+        { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }
+      );
+      const health = JSON.parse(output);
+      if (health.status === 'ok') {
+        console.log('[Discovery] Hermes connected');
+        skillRegistry.register({
+          id: 'hermes.chat',
+          name: 'Hermes Chat',
+          description: 'General-purpose conversational agent via Hermes (DeepSeek-powered)',
+          provider: 'hermes'
+        });
+        skillRegistry.register({
+          id: 'hermes.browser',
+          name: 'Hermes Browser',
+          description: 'Web browsing and data extraction via Hermes agent tools',
+          provider: 'hermes'
+        });
+        skillRegistry.register({
+          id: 'hermes.terminal',
+          name: 'Hermes Terminal',
+          description: 'Execute shell commands in isolated environments via Hermes',
+          provider: 'hermes'
+        });
+        skillRegistry.register({
+          id: 'hermes.search',
+          name: 'Hermes Search',
+          description: 'Web search and content retrieval via Hermes',
+          provider: 'hermes'
+        });
+      }
+    } catch (error: any) {
+      console.warn('[Discovery] Hermes discovery error:', error.message);
     }
   }
 

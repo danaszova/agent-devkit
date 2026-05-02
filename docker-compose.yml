@@ -57,33 +57,32 @@ services:
 
   # Hermes AI Agent Container
   hermes:
-    build:
-      context: .
-      dockerfile: src/docker/hermes/Dockerfile
+    image: nousresearch/hermes-agent:latest
     container_name: agent-devkit-hermes
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8642:8642"
     environment:
       - PYTHON_ENV=development
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AI_PROVIDER=openai
       - AGENT_NAME=hermes
       - HERMES_HOME=/opt/data
+      - API_SERVER_ENABLED=true
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_PORT=8642
+      - API_SERVER_KEY=${HERMES_API_KEY:-hermes-devkit-key}
     command: ["gateway", "run"]
     volumes:
-      - agent-devkit-skills:/opt/data/skills
-      - agent-devkit-config:/opt/data
-      - agent-devkit-memory:/opt/data/memories
-      - agent-devkit-logs:/opt/data/logs
+      - agent-devkit-hermes-data:/opt/data
     networks:
       - agent-devkit-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8642/v1/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -219,3 +218,9 @@ volumes:
     labels:
       - "agent-devkit.managed=true"
       - "agent-devkit.type=openclaw-data"
+
+  agent-devkit-hermes-data:
+    driver: local
+    labels:
+      - "agent-devkit.managed=true"
+      - "agent-devkit.type=hermes-data"

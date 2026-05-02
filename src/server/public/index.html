@@ -145,6 +145,11 @@
     </div>
 
     <div class="section">
+      <div class="section-title">⚕️ Hermes Agent</div>
+      <div id="hermesCard" class="grid"><div class="empty"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="section">
       <div class="section-title">🐳 Containers</div>
       <div id="containersGrid" class="grid"><div class="empty"><span class="spinner"></span></div></div>
     </div>
@@ -206,8 +211,11 @@
     async function loadStatus() {
       const data = await fetchJSON('/api/status');
       const badge = document.getElementById('statusBadge');
-      badge.textContent = data.openclawRunning ? 'OpenClaw Online' : 'OpenClaw Offline';
-      badge.style.color = data.openclawRunning ? 'var(--success)' : 'var(--danger)';
+      let statusText = [];
+      if (data.openclawRunning) statusText.push('OpenClaw');
+      if (data.hermesRunning) statusText.push('Hermes');
+      badge.textContent = statusText.length ? statusText.join(' + ') + ' Online' : 'Offline';
+      badge.style.color = statusText.length ? 'var(--success)' : 'var(--danger)';
       if (data.dashboardUrl) dashboardUrl = data.dashboardUrl;
       return data;
     }
@@ -240,6 +248,35 @@
         `).join('');
       } catch {
         grid.innerHTML = `<div class="empty"><h2>OpenClaw not running</h2><p>Start it with: agent-devkit start</p></div>`;
+      }
+    }
+
+    async function loadHermes() {
+      const grid = document.getElementById('hermesCard');
+      try {
+        const data = await fetchJSON('/api/status');
+        if (!data.hermesRunning) {
+          grid.innerHTML = `<div class="empty"><h2>Hermes not running</h2><p>Start it with: agent-devkit start</p></div>`;
+          return;
+        }
+        grid.innerHTML = `
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Hermes Agent</div>
+              <span class="status running">online</span>
+            </div>
+            <div class="meta">
+              <p>🧠 DeepSeek Chat (custom provider)</p>
+              <p>🔌 OpenAI-compatible API on port 8642</p>
+              <p>🛠 Browser, Terminal, Search, Chat tools</p>
+            </div>
+            <div class="actions">
+              <button class="btn-primary" onclick="window.open('http://localhost:8642','_blank')">🌐 API Docs</button>
+            </div>
+          </div>
+        `;
+      } catch {
+        grid.innerHTML = `<div class="empty"><h2>Hermes status unavailable</h2></div>`;
       }
     }
 
@@ -326,6 +363,7 @@
     async function refresh() {
       await loadStatus();
       await loadAgents();
+      await loadHermes();
       await loadContainers();
       await loadSkills();
     }
