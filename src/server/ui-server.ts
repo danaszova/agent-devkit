@@ -181,7 +181,11 @@ function serveStatic(filePath: string, res: http.ServerResponse): void {
 }
 
 export function startUIServer(): http.Server {
-  const publicDir = path.join(__dirname, 'public');
+  // Try dist first, then fall back to source (tsc doesn't copy static files)
+  const publicDir =
+    fs.existsSync(path.join(__dirname, 'public', 'index.html'))
+      ? path.join(__dirname, 'public')
+      : path.join(__dirname, '..', '..', '..', 'src', 'server', 'public');
 
   const server = http.createServer((req, res) => {
     // CORS
