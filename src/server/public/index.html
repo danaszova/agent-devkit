@@ -201,11 +201,14 @@
       setTimeout(() => t.classList.remove('show'), 3000);
     }
 
+    let dashboardUrl = 'http://localhost:18789';
+
     async function loadStatus() {
       const data = await fetchJSON('/api/status');
       const badge = document.getElementById('statusBadge');
       badge.textContent = data.openclawRunning ? 'OpenClaw Online' : 'OpenClaw Offline';
       badge.style.color = data.openclawRunning ? 'var(--success)' : 'var(--danger)';
+      if (data.dashboardUrl) dashboardUrl = data.dashboardUrl;
       return data;
     }
 
@@ -229,8 +232,8 @@
               <p>🔗 Bindings: ${a.bindings}</p>
             </div>
             <div class="actions">
-              <button class="btn-primary" onclick="chatAgent('${a.id}')">💬 Chat</button>
-              <button class="btn-secondary" onclick="window.open('http://localhost:18789','_blank')">🌐 Dashboard</button>
+              <button class="btn-primary" onclick="chatAgent('${a.chatUrl || 'http://localhost:18789'}')">💬 Chat</button>
+              <button class="btn-secondary" onclick="window.open('${dashboardUrl}','_blank')">🌐 Dashboard</button>
               ${a.isDefault ? '' : `<button class="btn-danger" onclick="deleteAgent('${a.id}')">🗑 Delete</button>`}
             </div>
           </div>
@@ -281,8 +284,8 @@
       }
     }
 
-    function chatAgent(id) {
-      window.open(`http://localhost:18789/?agent=${id}`, '_blank');
+    function chatAgent(url) {
+      window.open(url, '_blank');
     }
 
     function openCreateModal() { document.getElementById('createModal').classList.add('open'); }
